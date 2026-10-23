@@ -17,6 +17,8 @@ const { ensureDefaultRules } = require("./services/pricing");
 const { bootstrapAdminFromEnv } = require("./services/bootstrapAdmin");
 const { errorHandler } = require("./services/errorHandler");
 const { ensureSchema } = require("./services/ensureSchema");
+const { hermes } = require("./services/hermesClient");
+const { isOtpiqConfigured, getOtpiqProjectInfo } = require("./services/otpiqService");
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
     console.error("JWT_SECRET must be set and at least 32 characters long.");
@@ -80,7 +82,40 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads"), {
     },
 }));
 
-app.get("/health", (req, res) => res.json({ ok: true }));
+// Health check: /health (server + database), /health?full=1 also checks Hermeseus and OTPIQ.
+app.get("/health", async (req, res) => {
+    const checks = {};
+    const timed = async (name, fn) => {
+        const started = Date.now();
+        try {
+            const detail = await fn();
+            checks[name] = { ok: true, ms: Date.now() - started, ...(detail || {}) };
+        } catch (error) {
+            checks[name] = { ok: false, ms: Date.now() - started, error: error.code || error.message };
+        }
+    };
+
+    await timed("database", () => sequelize.authenticate());
+    if (req.query.full === "1") {
+        await timed("hermes", async () => {
+            const wallet = await hermes.getWallet();
+            return { environment: wallet.environment };
+        });
+        await timed("otpiq", async () => {
+            if (!isOtpiqConfigured()) return { configured: false };
+            await getOtpiqProjectInfo();
+            return { configured: true };
+        });
+    }
+
+    const ok = Object.values(checks).every((c) => c.ok || c.configured === false);
+    return res.status(ok ? 200 : 503).json({
+        ok,
+        uptimeSeconds: Math.round(process.uptime()),
+        time: new Date().toISOString(),
+        checks,
+    });
+});
 
 // Order matters: usersRouter serves /admin/login before the admin guard runs.
 app.use("/", usersRouter);

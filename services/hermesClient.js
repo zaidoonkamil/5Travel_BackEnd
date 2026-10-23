@@ -40,7 +40,8 @@ async function requestNewToken() {
     client_secret: HERMES.CLIENT_SECRET,
   });
 
-  if (res.status !== 200 || !res.data?.access_token) {
+  // The token endpoint answers 201 Created (not 200), so accept any 2xx.
+  if (res.status < 200 || res.status >= 300 || !res.data?.access_token) {
     throw toHermesError(res);
   }
 
