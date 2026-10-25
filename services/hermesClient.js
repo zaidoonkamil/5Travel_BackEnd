@@ -119,12 +119,83 @@ async function request(method, path, { params, data, idempotencyKey, responseTyp
   throw new HermesError({ status: 502, code: "supplier_auth_failed", message: "Supplier authentication failed" });
 }
 
+// Opens a server-sent events stream and returns the raw body stream.
+// Errors before the stream starts (auth, validation) are thrown like `request`.
+async function openStream(path, data, signal) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const token = await getAccessToken({ forceRefresh: attempt > 0 });
+    let res;
+    try {
+      res = await http.request({
+        method: "POST",
+        url: path,
+        data,
+        signal,
+        responseType: "stream",
+        headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" },
+      });
+    } catch (error) {
+      throw new HermesError({
+        status: 504,
+        code: error.code === "ECONNABORTED" ? "supplier_timeout" : "supplier_unreachable",
+        message: error.message,
+      });
+    }
+
+    if (res.status >= 200 && res.status < 300) return res.data;
+
+    // Error answers are plain JSON: read them fully before deciding.
+    let raw = "";
+    for await (const chunk of res.data) raw += chunk;
+    try {
+      res.data = JSON.parse(raw);
+    } catch (_) {
+      res.data = {};
+    }
+    if (res.status === 401 && attempt === 0 && TOKEN_ERROR_CODES.has(res.data?.error?.code)) {
+      cachedToken = null;
+      continue;
+    }
+    throw toHermesError(res);
+  }
+  throw new HermesError({ status: 502, code: "supplier_auth_failed", message: "Supplier authentication failed" });
+}
+
+// Yields { event, data } for each server-sent event of a stream.
+async function* readEvents(stream) {
+  let buffer = "";
+  for await (const chunk of stream) {
+    buffer += chunk.toString("utf8").replace(/\r\n/g, "\n");
+    let end;
+    while ((end = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      let event = "message";
+      const lines = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) lines.push(line.slice(5).replace(/^ /, ""));
+      }
+      if (lines.length === 0) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(lines.join("\n"));
+      } catch (_) {
+        continue;
+      }
+      yield { event, data: parsed };
+    }
+  }
+}
+
 const newIdempotencyKey = () => crypto.randomUUID();
 
 const hermes = {
   // Flights
   flightPlaces: (params) => request("GET", "/flights/places", { params }),
   searchFlights: (body) => request("POST", "/flights/searches", { data: body }),
+  // Offers arrive as each source answers: the first batch usually within ~1s.
+  streamFlightSearch: (body, signal) => openStream("/flights/searches/stream", body, signal),
   getFlightOffer: (id) => request("GET", `/flights/offers/${encodeURIComponent(id)}`),
   getFlightConditions: (id) => request("GET", `/flights/offers/${encodeURIComponent(id)}/conditions`),
   createFlightOrder: (body, idempotencyKey) =>
@@ -175,4 +246,4 @@ const hermes = {
   getWallet: () => request("GET", "/wallet"),
 };
 
-module.exports = { hermes, HermesError, newIdempotencyKey };
+module.exports = { hermes, HermesError, newIdempotencyKey, readEvents };

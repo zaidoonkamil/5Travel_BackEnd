@@ -1,7 +1,8 @@
 const express = require("express");
 const { Booking } = require("../models");
 const { authenticateTokenUser } = require("../middlewares/auth");
-const { hermes, newIdempotencyKey } = require("../services/hermesClient");
+const { hermes, newIdempotencyKey, readEvents, HermesError } = require("../services/hermesClient");
+const { hermesToResponse } = require("../services/errorHandler");
 const { getPricer } = require("../services/pricing");
 const { priceFlightOffer, priceFlightSearch } = require("../services/priceMappers");
 const { generateReference, serializeBooking, mapProviderStatus } = require("../services/bookings");
@@ -105,6 +106,81 @@ router.post("/flights/search", async (req, res) => {
   const payload = parseSearchBody(req.body);
   const [search, pricer] = await Promise.all([hermes.searchFlights(payload), getPricer("flights")]);
   return res.json(priceFlightSearch(search, pricer));
+});
+
+// Same search as a server-sent events stream: the app shows the first offers within
+// a second or two instead of waiting ~30s for the slowest airline source.
+// Events: `offers` (the full current list, priced; replaces the previous one), `done`, `error`.
+router.post("/flights/search/stream", async (req, res) => {
+  const payload = parseSearchBody(req.body);
+  const abort = new AbortController();
+  res.on("close", () => abort.abort());
+
+  // Errors before the stream opens go through the normal JSON error handler.
+  const [upstream, pricer] = await Promise.all([
+    hermes.streamFlightSearch(payload, abort.signal),
+    getPricer("flights"),
+  ]);
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no", // nginx: don't buffer the stream
+  });
+  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  // Slow sources can stay silent for 20s+; keep proxies and the app from timing out.
+  const heartbeat = setInterval(() => res.write(": ping\n\n"), 10000);
+
+  // Every `offers` event is the whole list (~2KB per offer), so on mobile data we send the
+  // first one at once, then at most one every OFFERS_INTERVAL_MS, and skip unchanged lists.
+  const OFFERS_INTERVAL_MS = 2500;
+  let lastSentAt = 0;
+  let lastSentJson = "";
+  let pending = null;
+  let flushTimer = null;
+  const flushOffers = () => {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+    if (!pending) return;
+    const json = JSON.stringify(pending);
+    pending = null;
+    if (json === lastSentJson) return;
+    lastSentJson = json;
+    lastSentAt = Date.now();
+    res.write(`event: offers\ndata: ${json}\n\n`);
+  };
+
+  try {
+    for await (const { event, data } of readEvents(upstream)) {
+      if (event === "offers") {
+        pending = { offer_count: data.offer_count, offers: priceFlightSearch(data, pricer).offers };
+        const wait = lastSentAt + OFFERS_INTERVAL_MS - Date.now();
+        if (wait <= 0) flushOffers();
+        else if (!flushTimer) flushTimer = setTimeout(flushOffers, wait);
+      } else if (event === "done") {
+        flushOffers();
+        send("done", { status: data.status, offer_count: data.offer_count });
+        break;
+      } else if (event === "error") {
+        flushOffers();
+        const err = data?.error || data || {};
+        const { body } = hermesToResponse(new HermesError({ status: err.status || 502, code: err.code, message: err.message }));
+        send("error", body);
+        break;
+      }
+    }
+  } catch (error) {
+    if (!abort.signal.aborted) {
+      console.error("[hermes] flight stream", error.code || "", error.message);
+      send("error", { code: "supplier_error", error: "تعذر الاتصال بمزود الخدمة، حاول مرة أخرى" });
+    }
+  } finally {
+    clearInterval(heartbeat);
+    clearTimeout(flushTimer);
+    upstream.destroy();
+    res.end();
+  }
 });
 
 // Revalidates the offer with the supplier and returns the confirmed selling price.
