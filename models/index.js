@@ -7,12 +7,17 @@ const OtpCode = require("./OtpCode");
 const UserDevice = require("./UserDevice");
 const NotificationLog = require("./NotificationLog");
 const Advertisement = require("./Advertisement");
+const SupportMessage = require("./SupportMessage");
 
 User.hasMany(Booking, { foreignKey: "userId", as: "bookings", onDelete: "CASCADE" });
 Booking.belongsTo(User, { foreignKey: "userId", as: "user", onDelete: "CASCADE" });
 
 User.hasMany(UserDevice, { foreignKey: "user_id", as: "devices", onDelete: "CASCADE" });
 UserDevice.belongsTo(User, { foreignKey: "user_id", as: "user", onDelete: "CASCADE" });
+
+User.hasMany(SupportMessage, { foreignKey: "userId", as: "supportMessages", onDelete: "CASCADE" });
+SupportMessage.belongsTo(User, { foreignKey: "userId", as: "user", onDelete: "CASCADE" });
+SupportMessage.belongsTo(User, { foreignKey: "adminId", as: "admin", constraints: false });
 
 module.exports = {
   User,
@@ -24,4 +29,5 @@ module.exports = {
   UserDevice,
   NotificationLog,
   Advertisement,
+  SupportMessage,
 };

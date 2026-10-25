@@ -15,6 +15,8 @@ const adminCustomRouter = require("./routes/adminCustom");
 const notificationsRouter = require("./routes/notifications");
 const adsRouter = require("./routes/ads");
 const adminRouter = require("./routes/admin");
+const supportRouter = require("./routes/support");
+const { initSupportSocket } = require("./services/supportSocket");
 const { ensureDefaultRules } = require("./services/pricing");
 const { bootstrapAdminFromEnv } = require("./services/bootstrapAdmin");
 const { errorHandler } = require("./services/errorHandler");
@@ -67,6 +69,7 @@ const corsOptions = {
 const app = express();
 app.set("trust proxy", 1);
 const server = http.createServer(app);
+initSupportSocket(server, corsOptions.origin);
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "1mb" }));
@@ -128,6 +131,7 @@ app.use("/", activitiesRouter);
 app.use("/", bookingsRouter);
 app.use("/", notificationsRouter);
 app.use("/", adsRouter);
+app.use("/", supportRouter);
 app.use("/", adminCustomRouter);
 app.use("/", adminRouter);
 

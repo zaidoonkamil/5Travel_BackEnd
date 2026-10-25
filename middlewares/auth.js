@@ -60,6 +60,22 @@ async function resolveUser(req, res) {
   return user;
 }
 
+// For connections that carry the token outside an HTTP header (the support chat socket).
+// Same checks as resolveUser; returns null instead of answering.
+async function userFromToken(token) {
+  if (!token) return null;
+  let decoded;
+  try {
+    decoded = await verifyToken(token);
+  } catch (_) {
+    return null;
+  }
+  const user = await User.findByPk(decoded.id);
+  if (!user || user.isActive === false) return null;
+  if ((decoded.tv || 0) !== (user.tokenVersion || 0) || decoded.role !== user.role) return null;
+  return user;
+}
+
 const authenticateTokenUser = async (req, res, next) => {
   try {
     const user = await resolveUser(req, res);
@@ -105,4 +121,5 @@ module.exports = {
   requireAdmin,
   optionalUser,
   extractTokenFromHeader,
+  userFromToken,
 };
