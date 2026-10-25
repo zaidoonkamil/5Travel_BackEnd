@@ -4,6 +4,7 @@ const { authenticateTokenUser } = require("../middlewares/auth");
 const { hermes, newIdempotencyKey, readEvents, HermesError } = require("../services/hermesClient");
 const { hermesToResponse } = require("../services/errorHandler");
 const { getPricer } = require("../services/pricing");
+const { isArabic, matchCities, localizePlace } = require("../services/arabicPlaces");
 const { priceFlightOffer, priceFlightSearch } = require("../services/priceMappers");
 const { generateReference, serializeBooking, mapProviderStatus } = require("../services/bookings");
 const { HttpError, badRequest } = require("../services/httpError");
@@ -95,11 +96,58 @@ function firstDepartureDate(offer) {
   return departing ? String(departing).slice(0, 10) : null;
 }
 
+// Place lists hardly change, and every app user shares one supplier rate limit.
+const placesCache = new Map();
+const PLACES_TTL = 24 * 60 * 60 * 1000;
+
+async function cachedFlightPlaces(query, limit) {
+  const key = `${query.toLowerCase()}|${limit}`;
+  const hit = placesCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.data;
+  const data = (await hermes.flightPlaces({ query, limit })).data || [];
+  if (placesCache.size >= 1000) placesCache.delete(placesCache.keys().next().value);
+  placesCache.set(key, { data, expires: Date.now() + PLACES_TTL });
+  return data;
+}
+
+// The supplier ranks loosely ("Amman" puts Dammam first), so keep only the city's own places:
+// by IATA code first, by English name when the code is a metro code it doesn't index.
+// Bus and rail stops share the city code; travellers pick a city or an airport.
+const isFlightPlace = (p) => p.type === "city" || /airport|international|intl/i.test(p.name);
+
+async function placesForCity(city, limit) {
+  const own = [];
+  for (const q of [city.code, city.en]) {
+    for (const p of await cachedFlightPlaces(q, limit)) {
+      if (p.city_code === city.code && isFlightPlace(p) && !own.some((o) => o.type === p.type && o.code === p.code)) own.push(p);
+    }
+    if (own.some((p) => p.type === "city")) break;
+  }
+  return own.sort((a, b) => (a.type === "city" ? 0 : 1) - (b.type === "city" ? 0 : 1));
+}
+
 router.get("/flights/places", async (req, res) => {
   const query = cleanText(req.query.query, 60);
   if (query.length < 2) return res.json({ data: [] });
-  const result = await hermes.flightPlaces({ query, limit: intInRange(req.query.limit, "limit", { min: 1, max: 20, fallback: 10 }) });
-  return res.json({ data: result.data || [] });
+  const limit = intInRange(req.query.limit, "limit", { min: 1, max: 20, fallback: 10 });
+  if (req.query.language !== "ar" && !isArabic(query)) {
+    return res.json({ data: await cachedFlightPlaces(query, limit) });
+  }
+
+  // The supplier only knows English names: Arabic queries go through our list.
+  const cities = isArabic(query) ? matchCities(query, 2) : [];
+  const groups = cities.length
+    ? await Promise.all(cities.map((c) => placesForCity(c, limit)))
+    : [await cachedFlightPlaces(query, limit)];
+  const seen = new Set();
+  const data = [];
+  for (const place of groups.flat()) {
+    const key = `${place.type}:${place.code}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    data.push(localizePlace(place));
+  }
+  return res.json({ data: data.slice(0, limit) });
 });
 
 router.post("/flights/search", async (req, res) => {

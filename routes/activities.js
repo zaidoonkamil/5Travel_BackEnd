@@ -4,6 +4,7 @@ const { Booking, CustomActivity } = require("../models");
 const { authenticateTokenUser } = require("../middlewares/auth");
 const { hermes, newIdempotencyKey } = require("../services/hermesClient");
 const { getPricer } = require("../services/pricing");
+const { isArabic, englishSearch, arabicCity } = require("../services/arabicPlaces");
 const {
   priceActivityList,
   priceActivityProduct,
@@ -39,6 +40,12 @@ function sanitizeOptionAnswers(list) {
   }));
 }
 
+// The supplier has no Arabic city names; fill in the ones we know.
+function withArabicCity(item) {
+  const ar = (!item.city_translated || item.city_translated === item.city) && arabicCity(item.city);
+  return ar ? { ...item, city_translated: ar } : item;
+}
+
 router.get("/activities/products", async (req, res) => {
   const params = {
     page: intInRange(req.query.page, "page", { min: 1, max: 1000, fallback: 1 }),
@@ -57,8 +64,18 @@ router.get("/activities/products", async (req, res) => {
     if (Number.isFinite(n) && n >= 0) params[key] = Math.round((n / (1 + pricer.rule.percent / 100)) * 100) / 100;
   }
 
-  const list = await hermes.listActivities(params);
+  // The supplier matches English only; our own activities are searched with the original text.
+  const typed = params.query;
+  const supplierParams = { ...params };
+  const english = typed && isArabic(typed) ? englishSearch(typed) : null;
+  if (english) {
+    // A city alone searches better as text: the supplier's city filter wants its exact spelling.
+    supplierParams.query = english.query || english.city;
+    if (english.query && english.city && !params.city) supplierParams.city = english.city;
+  }
+  const list = await hermes.listActivities(supplierParams);
   const result = priceActivityList(list, pricer);
+  if (params.language === "AR") result.data = (result.data || []).map(withArabicCity);
 
   if (params.page === 1) {
     const where = { isActive: true };
@@ -82,7 +99,8 @@ router.get("/activities/products/:id", async (req, res) => {
     hermes.getActivity(req.params.id, language ? { language } : undefined),
     getPricer("activities"),
   ]);
-  return res.json(priceActivityProduct(product, pricer));
+  const priced = priceActivityProduct(product, pricer);
+  return res.json(language === "AR" && priced ? withArabicCity(priced) : priced);
 });
 
 router.get("/activities/product-types/:id/availability", async (req, res) => {
