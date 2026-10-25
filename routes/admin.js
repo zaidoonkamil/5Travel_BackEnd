@@ -12,6 +12,7 @@ const {
 } = require("../services/bookingActions");
 const { invalidateCache, SERVICES } = require("../services/pricing");
 const { hermes } = require("../services/hermesClient");
+const { notifyBookingStatus } = require("../services/notifications");
 const { HttpError, badRequest } = require("../services/httpError");
 const { cleanText, intInRange, decimal, toBool } = require("../services/validators");
 
@@ -124,6 +125,15 @@ router.get("/admin/bookings", async (req, res) => {
   });
 });
 
+// Runs an action on a booking and pushes a notification to the customer if its status changed.
+async function withStatusNotification(id, action) {
+  const booking = await findBooking(id);
+  const before = booking.status;
+  const result = await action(booking);
+  if (result.status !== before) notifyBookingStatus(result);
+  return result;
+}
+
 async function findBooking(id) {
   const booking = await Booking.findByPk(id, { include: [{ model: User, as: "user" }] });
   if (!booking) throw new HttpError(404, "الحجز غير موجود");
@@ -136,17 +146,17 @@ router.get("/admin/bookings/:id", async (req, res) => {
 });
 
 router.post("/admin/bookings/:id/refresh", async (req, res) => {
-  const booking = await refreshBooking(await findBooking(req.params.id));
+  const booking = await withStatusNotification(req.params.id, refreshBooking);
   return res.json({ booking: serializeBooking(booking, { admin: true }) });
 });
 
 router.post("/admin/bookings/:id/issue", async (req, res) => {
-  const booking = await issueBooking(await findBooking(req.params.id));
+  const booking = await withStatusNotification(req.params.id, issueBooking);
   return res.json({ booking: serializeBooking(booking, { admin: true }) });
 });
 
 router.post("/admin/bookings/:id/cancel", async (req, res) => {
-  const booking = await cancelBooking(await findBooking(req.params.id));
+  const booking = await withStatusNotification(req.params.id, cancelBooking);
   return res.json({ booking: serializeBooking(booking, { admin: true }) });
 });
 
@@ -158,7 +168,7 @@ router.get("/admin/bookings/:id/refund-quote", async (req, res) => {
 router.post("/admin/bookings/:id/refund", async (req, res) => {
   const body = {};
   if (Array.isArray(req.body?.ticket_numbers)) body.ticket_numbers = req.body.ticket_numbers.map(String);
-  const booking = await refundBooking(await findBooking(req.params.id), body);
+  const booking = await withStatusNotification(req.params.id, (b) => refundBooking(b, body));
   return res.json({ booking: serializeBooking(booking, { admin: true }) });
 });
 

@@ -17,6 +17,10 @@ const otpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: "مح
 const MIN_PASSWORD_LENGTH = 8;
 const NOT_VERIFIED_MESSAGE = "الحساب غير موثق. يرجى إدخال رمز التحقق المرسل على واتساب.";
 
+// WhatsApp verification of new accounts. Off for now (accounts are active right after sign-up);
+// set REQUIRE_PHONE_VERIFICATION=true in .env to turn the OTP step back on.
+const requirePhoneVerification = () => process.env.REQUIRE_PHONE_VERIFICATION === "true";
+
 function signToken(user) {
   return jwt.sign(
     { id: user.id, role: user.role, tv: user.tokenVersion || 0 },
@@ -74,7 +78,11 @@ async function login(req, res, { adminOnly }) {
   assertNotBanned(user);
   if (adminOnly && user.role !== "admin") throw new HttpError(403, "هذا الحساب ليس حساب أدمن");
   if (user.status === "pending") {
-    throw new HttpError(403, NOT_VERIFIED_MESSAGE, { code: "account_not_verified", phone: user.phone });
+    if (requirePhoneVerification()) {
+      throw new HttpError(403, NOT_VERIFIED_MESSAGE, { code: "account_not_verified", phone: user.phone });
+    }
+    // Verification is off: accounts left pending from before are activated on login.
+    user.status = "active";
   }
 
   user.lastLoginAt = new Date();
@@ -103,12 +111,25 @@ router.post("/auth/register", authLimiter, async (req, res) => {
   }
 
   const hash = await bcrypt.hash(password, 12);
+  // The status is decided here, never taken from the client.
+  const status = requirePhoneVerification() ? "pending" : "active";
   if (user) {
     // Unverified account registered again: refresh its details instead of failing.
-    await user.update({ fullName, email, password: hash, phone });
+    await user.update({ fullName, email, password: hash, phone, status });
   } else {
-    // Self sign-up is always pending until the phone is verified (never trust a client status).
-    user = await User.create({ fullName, phone, email, password: hash, role: "user", status: "pending" });
+    user = await User.create({ fullName, phone, email, password: hash, role: "user", status });
+  }
+
+  if (status === "active") {
+    // No verification step: logged in straight away.
+    user.lastLoginAt = new Date();
+    await user.save();
+    return res.status(201).json({
+      requiresVerification: false,
+      token: signToken(user),
+      user: serializeUser(user),
+      message: "تم إنشاء الحساب بنجاح",
+    });
   }
 
   const otp = await sendOtp(phone, OTP_PURPOSES.verifyAccount).catch((error) => {
