@@ -10,6 +10,8 @@ const { cleanText, requireText, intInRange, decimal, toBool, parseJsonArray } = 
 
 const router = express.Router();
 
+const STAY_CATEGORIES = ["hotel", "chalet", "farm"];
+
 const MAX_IMAGES = 10;
 const UPLOAD_PREFIX = "uploads/custom/";
 
@@ -66,6 +68,14 @@ function parseHotel(body, { partial }) {
     data.hermesCityId = /^\d+$/.test(id) ? id : null;
   }
   if (body.stars !== undefined) data.stars = intInRange(body.stars, "النجوم", { min: 0, max: 5, fallback: 0 });
+  if (body.category !== undefined) {
+    if (!STAY_CATEGORIES.includes(body.category)) throw new HttpError(400, "نوع الإقامة غير صحيح");
+    data.category = body.category;
+  }
+  if (body.capacity !== undefined) {
+    data.capacity = body.capacity === "" || body.capacity === null ? null : intInRange(body.capacity, "السعة", { min: 1, max: 1000 });
+  }
+  if (body.priceUnit !== undefined) data.priceUnit = body.priceUnit === "day" ? "day" : "night";
   if (body.mealPlan !== undefined) data.mealPlan = cleanText(body.mealPlan, 120) || null;
   if (body.facilities !== undefined) data.facilities = parseJsonArray(body.facilities);
   if (body.sortOrder !== undefined) data.sortOrder = intInRange(body.sortOrder, "الترتيب", { min: 0, max: 100000, fallback: 0 });

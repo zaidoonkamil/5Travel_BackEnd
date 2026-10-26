@@ -17,6 +17,7 @@ const adsRouter = require("./routes/ads");
 const adminRouter = require("./routes/admin");
 const supportRouter = require("./routes/support");
 const visasRouter = require("./routes/visas");
+const currenciesRouter = require("./routes/currencies");
 const { initSupportSocket } = require("./services/supportSocket");
 const { ensureDefaultRules } = require("./services/pricing");
 const { bootstrapAdminFromEnv } = require("./services/bootstrapAdmin");
@@ -134,6 +135,7 @@ app.use("/", notificationsRouter);
 app.use("/", adsRouter);
 app.use("/", supportRouter);
 app.use("/", visasRouter);
+app.use("/", currenciesRouter);
 app.use("/", adminCustomRouter);
 app.use("/", adminRouter);
 

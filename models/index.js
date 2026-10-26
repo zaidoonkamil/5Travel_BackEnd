@@ -10,6 +10,7 @@ const Advertisement = require("./Advertisement");
 const SupportMessage = require("./SupportMessage");
 const VisaOffer = require("./VisaOffer");
 const VisaApplication = require("./VisaApplication");
+const CurrencyOverride = require("./CurrencyOverride");
 
 User.hasMany(Booking, { foreignKey: "userId", as: "bookings", onDelete: "CASCADE" });
 Booking.belongsTo(User, { foreignKey: "userId", as: "user", onDelete: "CASCADE" });
@@ -39,4 +40,5 @@ module.exports = {
   SupportMessage,
   VisaOffer,
   VisaApplication,
+  CurrencyOverride,
 };

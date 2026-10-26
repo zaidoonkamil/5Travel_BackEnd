@@ -45,6 +45,23 @@ const CustomHotel = sequelize.define(
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
     },
+    // hotel · chalet · farm (chalets and farms are booked whole, mostly inside Iraq).
+    category: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "hotel",
+    },
+    // Most guests the place takes (chalets/farms); null = not limited.
+    capacity: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    // What the price covers: "night" or "day" (day-use chalets).
+    priceUnit: {
+      type: DataTypes.STRING(10),
+      allowNull: false,
+      defaultValue: "night",
+    },
     mealPlan: {
       type: DataTypes.STRING(120),
       allowNull: true,

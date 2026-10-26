@@ -104,7 +104,8 @@ router.post("/hotels/search", async (req, res) => {
   // Admin hotels linked to this city are shown on the first page.
   if (payload.city_id && (!payload.page || payload.page === 1)) {
     const custom = await CustomHotel.findAll({
-      where: { isActive: true, hermesCityId: String(payload.city_id) },
+      // Chalets and farms have their own tabs; the supplier search mixes in hotels only.
+      where: { isActive: true, hermesCityId: String(payload.city_id), category: "hotel" },
       order: [["sortOrder", "ASC"], ["id", "DESC"]],
     });
     result.custom_hotels = custom.map((h) => serializeCustomHotel(h, req));
@@ -190,15 +191,19 @@ router.post("/hotels/book", authenticateTokenUser, async (req, res) => {
 
 // ---------------- Admin custom hotels (public side) ----------------
 
+// ?category=hotel|chalet|farm narrows the list; `cities` lists every city of that category for the filter chips.
 router.get("/custom-hotels", async (req, res) => {
   const where = { isActive: true };
+  if (["hotel", "chalet", "farm"].includes(req.query.category)) where.category = req.query.category;
+  const cities = [...new Set((await CustomHotel.findAll({ where, attributes: ["city"], raw: true })).map((h) => h.city))];
+
   const city = cleanText(req.query.city, 120);
   const query = cleanText(req.query.query, 120);
   if (city) where.city = { [Op.like]: `%${city}%` };
   if (query) where[Op.or] = [{ name: { [Op.like]: `%${query}%` } }, { city: { [Op.like]: `%${query}%` } }];
 
   const hotels = await CustomHotel.findAll({ where, order: [["sortOrder", "ASC"], ["id", "DESC"]], limit: 100 });
-  return res.json({ data: hotels.map((h) => serializeCustomHotel(h, req)) });
+  return res.json({ data: hotels.map((h) => serializeCustomHotel(h, req)), cities });
 });
 
 router.get("/custom-hotels/:id", async (req, res) => {
@@ -214,13 +219,21 @@ router.post("/custom-hotels/:id/book", authenticateTokenUser, async (req, res) =
   const body = req.body || {};
   const checkIn = requireDate(body.check_in, "تاريخ الدخول");
   const checkOut = requireDate(body.check_out, "تاريخ الخروج");
-  const nights = Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86400000);
-  if (nights < 1 || nights > 60) throw badRequest("مدة الإقامة غير صالحة");
+  // Priced per night: checkout day not counted. Priced per day (day-use): both days count,
+  // so a single day has the same check-in and check-out date.
+  const span = Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86400000);
+  const nights = hotel.priceUnit === "day" ? span + 1 : span;
+  if (span < 0 || nights < 1 || nights > 60) throw badRequest("مدة الإقامة غير صالحة");
   if (Date.parse(checkIn) < Date.now() - 86400000) throw badRequest("تاريخ الدخول في الماضي");
 
-  const roomsCount = intInRange(body.rooms, "عدد الغرف", { min: 1, max: 10, fallback: 1 });
-  const adults = intInRange(body.adults, "عدد البالغين", { min: 1, max: 40, fallback: 1 });
-  const children = intInRange(body.children, "عدد الأطفال", { min: 0, max: 20, fallback: 0 });
+  // Chalets and farms are rented whole: one unit, guests within its capacity.
+  const wholePlace = hotel.category === "chalet" || hotel.category === "farm";
+  const roomsCount = wholePlace ? 1 : intInRange(body.rooms, "عدد الغرف", { min: 1, max: 10, fallback: 1 });
+  const adults = intInRange(body.adults, "عدد البالغين", { min: 1, max: 200, fallback: 1 });
+  const children = intInRange(body.children, "عدد الأطفال", { min: 0, max: 100, fallback: 0 });
+  if (hotel.capacity && adults + children > hotel.capacity) {
+    throw badRequest(`السعة القصوى ${hotel.capacity} أشخاص`);
+  }
   const contact = {
     name: requireText(body.contact?.name, "اسم صاحب الحجز", 120),
     email: body.contact?.email ? requireEmail(body.contact.email) : null,
@@ -233,7 +246,7 @@ router.post("/custom-hotels/:id/book", authenticateTokenUser, async (req, res) =
     userId: req.user.id,
     service: "custom_hotel",
     status: "pending",
-    title: `${hotel.name} · ${nights} ليالي`,
+    title: `${hotel.name} · ${nights} ${hotel.priceUnit === "day" ? "أيام" : "ليالي"}`,
     travelDate: checkIn,
     customItemId: hotel.id,
     currency: "USD",
@@ -242,7 +255,13 @@ router.post("/custom-hotels/:id/book", authenticateTokenUser, async (req, res) =
     sellAmount: total,
     contact,
     details: {
-      hotel: { id: hotel.id, name: hotel.name, city: hotel.city, images: (hotel.images || []).slice(0, 3) },
+      hotel: {
+        id: hotel.id,
+        name: hotel.name,
+        city: hotel.city,
+        category: hotel.category,
+        images: (hotel.images || []).slice(0, 3),
+      },
       check_in: checkIn,
       check_out: checkOut,
       nights,
@@ -250,6 +269,7 @@ router.post("/custom-hotels/:id/book", authenticateTokenUser, async (req, res) =
       adults,
       children,
       pricePerNight: Number(hotel.pricePerNight),
+      priceUnit: hotel.priceUnit,
       note: cleanText(body.note, 500) || null,
     },
   });
