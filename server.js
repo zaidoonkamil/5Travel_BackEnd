@@ -18,6 +18,8 @@ const adminRouter = require("./routes/admin");
 const supportRouter = require("./routes/support");
 const visasRouter = require("./routes/visas");
 const currenciesRouter = require("./routes/currencies");
+const partnerRouter = require("./routes/partner");
+const adminPartnersRouter = require("./routes/adminPartners");
 const { initSupportSocket } = require("./services/supportSocket");
 const { ensureDefaultRules } = require("./services/pricing");
 const { bootstrapAdminFromEnv } = require("./services/bootstrapAdmin");
@@ -136,6 +138,8 @@ app.use("/", adsRouter);
 app.use("/", supportRouter);
 app.use("/", visasRouter);
 app.use("/", currenciesRouter);
+app.use("/", partnerRouter);
+app.use("/", adminPartnersRouter);
 app.use("/", adminCustomRouter);
 app.use("/", adminRouter);
 

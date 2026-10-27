@@ -81,6 +81,11 @@ const CustomHotel = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    // Partner account (hotel / farm owner, tour operator…) that manages this listing's bookings.
+    ownerId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
     isActive: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

@@ -36,6 +36,7 @@ function serializeUser(user) {
     email: user.email,
     phone: user.phone,
     role: user.role,
+    isPartner: Boolean(user.isPartner),
     createdAt: user.createdAt,
   };
 }

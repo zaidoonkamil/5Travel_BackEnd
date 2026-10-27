@@ -36,6 +36,12 @@ const User = sequelize.define("User", {
         allowNull: false,
         defaultValue: "active",
     },
+    // Owner of listings the admin linked to this account; sees the partner screens in the app.
+    isPartner: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+    },
     isActive: {
         type: DataTypes.BOOLEAN,
         allowNull: false,

@@ -12,6 +12,7 @@ const {
 } = require("../services/priceMappers");
 const { generateReference, serializeBooking, mapProviderStatus } = require("../services/bookings");
 const { serializeCustomActivity } = require("../services/customSerializers");
+const { notifyPartnerOfBooking } = require("../services/partners");
 const { HttpError, badRequest } = require("../services/httpError");
 const {
   cleanText,
@@ -255,6 +256,7 @@ router.post("/custom-activities/:id/book", authenticateTokenUser, async (req, re
     },
   });
 
+  notifyPartnerOfBooking(booking);
   return res.status(201).json({ booking: serializeBooking(booking) });
 });
 
