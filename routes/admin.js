@@ -185,6 +185,7 @@ router.get("/admin/users", async (req, res) => {
   const page = intInRange(req.query.page, "page", { min: 1, max: 10000, fallback: 1 });
   const limit = intInRange(req.query.limit, "limit", { min: 1, max: 100, fallback: 25 });
   const where = {};
+  if (toBool(req.query.partners)) where.isPartner = true;
   const search = cleanText(req.query.search, 100);
   if (search) {
     where[Op.or] = [
@@ -207,6 +208,7 @@ router.get("/admin/users", async (req, res) => {
       email: u.email,
       phone: u.phone,
       role: u.role,
+      isPartner: Boolean(u.isPartner),
       isActive: u.isActive,
       lastLoginAt: u.lastLoginAt,
       createdAt: u.createdAt,

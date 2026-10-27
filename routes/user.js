@@ -2,13 +2,15 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { Op } = require("sequelize");
-const { User } = require("../models");
+const crypto = require("crypto");
+const { User, UserDevice, SupportMessage } = require("../models");
 const { authenticateTokenUser } = require("../middlewares/auth");
 const { rateLimit } = require("../middlewares/requestRateLimiter");
 const { HttpError, badRequest } = require("../services/httpError");
 const { requireText, requireEmail } = require("../services/validators");
 const { normalizePhone, phoneVariants } = require("../services/phoneUtils");
 const { OTP_PURPOSES, sendOtp, verifyOtp } = require("../services/otpService");
+const { assignListings } = require("../services/partners");
 
 const router = express.Router();
 
@@ -246,6 +248,30 @@ router.post("/auth/change-password", authenticateTokenUser, authLimiter, async (
   user.tokenVersion += 1;
   await user.save();
   return res.json({ token: signToken(user), message: "تم تغيير كلمة المرور" });
+});
+
+// The user deletes their own account. Personal details are wiped and the phone is freed for a
+// new sign-up; bookings and visa applications stay (anonymised) for the accounting records.
+router.delete("/auth/me", authenticateTokenUser, authLimiter, async (req, res) => {
+  const user = await User.scope("withPassword").findByPk(req.user.id);
+  if (user.role === "admin") throw new HttpError(403, "لا يمكن حذف حساب الأدمن من التطبيق");
+  const valid = await bcrypt.compare(String(req.body?.password || ""), user.password);
+  if (!valid) throw new HttpError(400, "كلمة المرور غير صحيحة");
+
+  if (user.isPartner) await assignListings(user.id, []);
+  await UserDevice.destroy({ where: { user_id: user.id } });
+  await SupportMessage.destroy({ where: { userId: user.id } });
+
+  user.fullName = "حساب محذوف";
+  user.phone = null;
+  user.email = null;
+  user.password = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12);
+  user.isPartner = false;
+  user.isActive = false;
+  // Ends every session on every device.
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
+  await user.save();
+  return res.json({ ok: true, message: "تم حذف حسابك" });
 });
 
 module.exports = router;
