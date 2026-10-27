@@ -36,6 +36,12 @@ const User = sequelize.define("User", {
         allowNull: false,
         defaultValue: "active",
     },
+    // Wallet balance in IQD (whole dinars); every change is a WalletTransaction.
+    walletBalance: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+    },
     // Owner of listings the admin linked to this account; sees the partner screens in the app.
     isPartner: {
         type: DataTypes.BOOLEAN,

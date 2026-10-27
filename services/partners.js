@@ -40,7 +40,8 @@ function bookingsWhere(listings) {
       return ids.length ? { service, customItemId: { [Op.in]: ids } } : null;
     })
     .filter(Boolean);
-  return or.length ? { [Op.or]: or } : null;
+  // Unpaid requests are not real yet: the owner only hears about a booking once it is paid.
+  return or.length ? { [Op.and]: [{ [Op.or]: or }, { paymentStatus: { [Op.ne]: "unpaid" } }] } : null;
 }
 
 // Links exactly these listings to the partner (taking them from any other partner)

@@ -19,6 +19,7 @@ const supportRouter = require("./routes/support");
 const visasRouter = require("./routes/visas");
 const currenciesRouter = require("./routes/currencies");
 const partnerRouter = require("./routes/partner");
+const walletRouter = require("./routes/wallet");
 const adminPartnersRouter = require("./routes/adminPartners");
 const { initSupportSocket } = require("./services/supportSocket");
 const { ensureDefaultRules } = require("./services/pricing");
@@ -76,7 +77,8 @@ const server = http.createServer(app);
 initSupportSocket(server, corsOptions.origin);
 
 app.use(cors(corsOptions));
-app.use(express.json({ limit: "1mb" }));
+// The raw bytes are kept for webhook signature checks (SwiftPay signs the body exactly as sent).
+app.use(express.json({ limit: "1mb", verify: (req, res, buf) => { req.rawBody = buf.toString("utf8"); } }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 app.use((req, res, next) => {
@@ -139,6 +141,7 @@ app.use("/", supportRouter);
 app.use("/", visasRouter);
 app.use("/", currenciesRouter);
 app.use("/", partnerRouter);
+app.use("/", walletRouter);
 app.use("/", adminPartnersRouter);
 app.use("/", adminCustomRouter);
 app.use("/", adminRouter);

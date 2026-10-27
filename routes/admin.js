@@ -1,6 +1,7 @@
 const express = require("express");
 const { Op, fn, col } = require("sequelize");
-const { User, Booking, PricingRule } = require("../models");
+const { User, Booking, PricingRule, WalletTransaction } = require("../models");
+const wallet = require("../services/wallet");
 const { requireAdmin } = require("../middlewares/auth");
 const { serializeBooking } = require("../services/bookings");
 const {
@@ -209,6 +210,7 @@ router.get("/admin/users", async (req, res) => {
       phone: u.phone,
       role: u.role,
       isPartner: Boolean(u.isPartner),
+      walletBalance: u.walletBalance,
       isActive: u.isActive,
       lastLoginAt: u.lastLoginAt,
       createdAt: u.createdAt,
@@ -224,6 +226,30 @@ router.patch("/admin/users/:id/status", async (req, res) => {
   user.isActive = toBool(req.body?.isActive);
   await user.save();
   return res.json({ id: user.id, isActive: user.isActive });
+});
+
+// ---------------- Wallets ----------------
+
+router.get("/admin/users/:id/wallet", async (req, res) => {
+  const user = await User.findByPk(req.params.id);
+  if (!user) throw new HttpError(404, "المستخدم غير موجود");
+  const transactions = await WalletTransaction.findAll({ where: { userId: user.id }, order: [["id", "DESC"]], limit: 100 });
+  return res.json({ balance: user.walletBalance, transactions: transactions.map((t) => ({ ...wallet.serializeTransaction(t), adminId: t.adminId })) });
+});
+
+// Manual correction by support (a goodwill credit, a refund done outside the app…). Always with a reason.
+router.post("/admin/users/:id/wallet", async (req, res) => {
+  const user = await User.findByPk(req.params.id);
+  if (!user) throw new HttpError(404, "المستخدم غير موجود");
+  const amount = Math.round(Number(req.body?.amount));
+  if (!Number.isSafeInteger(amount) || amount === 0 || Math.abs(amount) > 50000000) throw badRequest("المبلغ غير صالح");
+  const note = cleanText(req.body?.note, 300);
+  if (!note) throw badRequest("اكتب سبب التعديل");
+  const meta = { type: "adjustment", adminId: req.user.id, note };
+  if (amount > 0) await wallet.credit(user.id, amount, meta);
+  else await wallet.debit(user.id, -amount, meta);
+  await user.reload();
+  return res.json({ balance: user.walletBalance });
 });
 
 module.exports = router;

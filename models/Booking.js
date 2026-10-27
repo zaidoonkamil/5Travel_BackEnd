@@ -80,6 +80,21 @@ const Booking = sequelize.define(
       type: DataTypes.DECIMAL(12, 2),
       allowNull: false,
     },
+    // Online payment (no cash): unpaid → paid → refunded (back to the wallet).
+    paymentStatus: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+      defaultValue: "unpaid",
+    },
+    // What was taken from the wallet, in IQD.
+    paidAmount: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    paidAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
     contact: {
       type: DataTypes.JSON,
       allowNull: true,

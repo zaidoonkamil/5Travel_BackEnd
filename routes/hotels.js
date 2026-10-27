@@ -7,7 +7,6 @@ const { getPricer } = require("../services/pricing");
 const { priceHotelSearch, priceHotelRate } = require("../services/priceMappers");
 const { generateReference, serializeBooking, mapProviderStatus } = require("../services/bookings");
 const { serializeCustomHotel } = require("../services/customSerializers");
-const { notifyPartnerOfBooking } = require("../services/partners");
 const { HttpError, badRequest } = require("../services/httpError");
 const {
   cleanText,
@@ -275,7 +274,6 @@ router.post("/custom-hotels/:id/book", authenticateTokenUser, async (req, res) =
     },
   });
 
-  notifyPartnerOfBooking(booking);
   return res.status(201).json({ booking: serializeBooking(booking) });
 });
 

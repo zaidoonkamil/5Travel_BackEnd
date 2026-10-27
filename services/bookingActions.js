@@ -1,6 +1,8 @@
 const { hermes, newIdempotencyKey } = require("./hermesClient");
 const { mapProviderStatus } = require("./bookings");
 const { HttpError } = require("./httpError");
+const wallet = require("./wallet");
+const { Booking } = require("../models");
 
 const SUPPLIER_SERVICES = new Set(["flight", "hotel", "activity"]);
 
@@ -24,6 +26,8 @@ async function applyProviderState(booking, order) {
     providerDeadline: deadlineOf(booking.service, order) || booking.providerDeadline,
     details: { ...(booking.details || {}), providerSnapshot: order },
   });
+  // The supplier dropped a booking the customer already paid for (e.g. the hold expired).
+  if (["cancelled", "failed"].includes(booking.status)) await refundToWallet(booking);
   return booking;
 }
 
@@ -42,10 +46,32 @@ async function refreshBooking(booking) {
   return applyProviderState(booking, order);
 }
 
+// Puts what the customer paid back in their wallet (cards cannot be refunded through the gateway).
+// Safe to call twice: only the call that flips paid → refunded credits the wallet.
+async function refundToWallet(booking, note) {
+  if (booking.paymentStatus !== "paid" || !booking.paidAmount) return false;
+  const [flipped] = await Booking.update(
+    { paymentStatus: "refunded" },
+    { where: { id: booking.id, paymentStatus: "paid" } }
+  );
+  if (!flipped) return false;
+  booking.paymentStatus = "refunded";
+  await wallet.credit(booking.userId, booking.paidAmount, {
+    type: "refund",
+    bookingId: booking.id,
+    note: note || `استرجاع الحجز ${booking.reference}`,
+  });
+  return true;
+}
+
 // Issue the ticket / confirm the hotel / confirm the activity (after the customer paid).
 async function issueBooking(booking) {
   if (booking.status !== "pending") {
     throw new HttpError(409, "يمكن تأكيد الحجوزات المعلقة فقط");
+  }
+  // Payments are online only: nothing is confirmed before the money is in.
+  if (booking.paymentStatus !== "paid") {
+    throw new HttpError(409, "الحجز غير مدفوع بعد", { code: "booking_unpaid" });
   }
   if (!requireSupplierRef(booking)) {
     await booking.update({ status: "confirmed" });
@@ -68,6 +94,7 @@ async function cancelBooking(booking) {
   }
   if (!requireSupplierRef(booking)) {
     await booking.update({ status: "cancelled" });
+    await refundToWallet(booking);
     return booking;
   }
 
@@ -77,6 +104,7 @@ async function cancelBooking(booking) {
   if (booking.service === "activity") await hermes.cancelActivityBooking(booking.providerRef, key);
 
   await booking.update({ status: "cancelled" });
+  await refundToWallet(booking);
   return refreshBooking(booking).catch(() => booking);
 }
 
@@ -102,6 +130,7 @@ async function refundBooking(booking, body = {}) {
 }
 
 module.exports = {
+  refundToWallet,
   refreshBooking,
   issueBooking,
   cancelBooking,

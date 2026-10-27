@@ -11,6 +11,8 @@ const SupportMessage = require("./SupportMessage");
 const VisaOffer = require("./VisaOffer");
 const VisaApplication = require("./VisaApplication");
 const CurrencyOverride = require("./CurrencyOverride");
+const Payment = require("./Payment");
+const WalletTransaction = require("./WalletTransaction");
 
 User.hasMany(Booking, { foreignKey: "userId", as: "bookings", onDelete: "CASCADE" });
 Booking.belongsTo(User, { foreignKey: "userId", as: "user", onDelete: "CASCADE" });
@@ -27,6 +29,10 @@ VisaApplication.belongsTo(User, { foreignKey: "userId", as: "user", onDelete: "C
 // Applications keep their own copy of the visa, so deleting an offer leaves them intact.
 VisaApplication.belongsTo(VisaOffer, { foreignKey: "visaId", as: "offer", constraints: false });
 
+User.hasMany(WalletTransaction, { foreignKey: "userId", as: "walletTransactions", onDelete: "CASCADE" });
+WalletTransaction.belongsTo(User, { foreignKey: "userId", as: "user", onDelete: "CASCADE" });
+User.hasMany(Payment, { foreignKey: "userId", as: "payments", onDelete: "CASCADE" });
+
 module.exports = {
   User,
   PricingRule,
@@ -41,4 +47,6 @@ module.exports = {
   VisaOffer,
   VisaApplication,
   CurrencyOverride,
+  Payment,
+  WalletTransaction,
 };
